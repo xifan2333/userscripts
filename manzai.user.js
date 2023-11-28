@@ -3,13 +3,13 @@
 // @namespace    http://tampermonkey.net/
 // @version      0.1
 // @description  Add select button to Bilibili history page, send selected titles to GitHub issue, and copy to clipboard
-// @author       You
+// @author       稀饭
 // @match        https://www.bilibili.com/account/history*
 // @grant        GM_setClipboard
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-// utils
+
 
 (function () {
   "use strict";
@@ -44,6 +44,7 @@
       }
     }
   }
+
   function addPunchButton() {
     // 调整布局
     const searchBar = document.querySelector(".b-head-search");
@@ -159,6 +160,7 @@
         console.error("Error getting issue content:", error);
       });
   }
+
   function main() {
     const githubToken = localStorage.getItem("githubToken");
     checkToken(githubToken);
@@ -166,5 +168,7 @@
     addCheckbox();
     addBtnHandler(btn);
   }
+
   main();
+  
 })();
