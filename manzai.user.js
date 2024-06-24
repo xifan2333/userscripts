@@ -116,7 +116,7 @@
 
     // 使用Fetch API发送GET请求到GitHub API，获取原有的 GitHub Issue 内容
     fetch(
-      "https://api.github.com/repos/xifan2333/pessoa-golden-house/issues/14",
+      "https://api.github.com/repos/xifan2333/pessoa-golden-house/issues/22",
       {
         method: "GET",
         headers: {
@@ -135,7 +135,7 @@
 
         // 使用Fetch API发送PATCH请求到GitHub API，更新 GitHub Issue 内容
         fetch(
-          `https://api.github.com/repos/xifan2333/pessoa-golden-house/issues/14`,
+          `https://api.github.com/repos/xifan2333/pessoa-golden-house/issues/22`,
           {
             method: "PATCH",
             headers: {
