@@ -5,5 +5,5 @@
 // @author       稀饭
 // @connect      github.com
 // @scriptUrl   https://github.com/xifan2333/userscripts/raw/main/manzai.user.js
-// 
+// @scriptUrl   https://github.com/xifan2333/userscripts/raw/main/compass.user.js
 // ==/UserSubscribe==
