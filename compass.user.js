@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖店数据面板修改器
 // @namespace    http://tampermonkey.net/
-// @version      0.6
+// @version      0.7
 // @description  修改抖店数据面板的显示内容
 // @author       xifan
 // @match        https://compass.jinritemai.com/shop/business-part*
@@ -123,8 +123,14 @@
         RATIO: '[class*="cp-change-ratio-value"]',
         TREND: '[class*="cp-change-ratio-trend"]',
         BOTTOM_ITEMS: '[class*="bottomItem-"]',
-        AVATAR: '[class*="img-default-wrapper"] img',
-        USERNAME: '[class*="userName-"]'
+        AVATAR: {
+            TOP: '[class*="userDropDown-"] [class*="img-default-wrapper"] img',
+            DROPDOWN: '[class*="dropDownInfo-"] [class*="img-default-wrapper"] img'
+        },
+        USERNAME: {
+            TOP: '[class*="userName-"]',
+            DROPDOWN: '[class*="dropDownName-"]'
+        }
     };
 
     let panel = null;
@@ -132,10 +138,24 @@
 
     // 添加格式化工具函数
     const formatters = {
-        // 格式化金额
+        // 格式化金额（添加千分位和¥符号）
         formatMoney(value) {
             if(!value) return value;
-            return value.toString().startsWith('¥') ? value : `¥${value}`;
+            
+            // 移除已有的¥符号和逗号
+            let num = value.toString().replace(/[¥,]/g, '');
+            
+            // 检查是否为有效数字
+            if(isNaN(num)) return value;
+            
+            // 处理小数部分
+            const parts = num.toString().split('.');
+            
+            // 添加千分位
+            parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            
+            // 组合结果并添加¥符号
+            return `¥${parts.join('.')}`;
         },
         
         // 格式化百分比
@@ -300,20 +320,30 @@
         });
     }
 
-    // 监听DOM变化
+    // 修改监听DOM变化函数
     function observeDOM() {
         const observer = new MutationObserver((mutations) => {
             for(const mutation of mutations) {
                 if(mutation.addedNodes.length) {
                     const container = document.querySelector(SELECTORS.CONTAINER);
                     const cards = document.querySelectorAll(SELECTORS.CARD);
+                    const topAvatar = document.querySelector(SELECTORS.AVATAR.TOP);
+                    const dropdownAvatar = document.querySelector(SELECTORS.AVATAR.DROPDOWN);
+                    const topUsername = document.querySelector(SELECTORS.USERNAME.TOP);
+                    const dropdownUsername = document.querySelector(SELECTORS.USERNAME.DROPDOWN);
                     
-                    if(container && cards.length > 0) {
+                    // 检查所有必需元素是否都已加载
+                    if(container && cards.length > 0 && 
+                       topAvatar && topUsername && 
+                       (dropdownAvatar || dropdownUsername)) {
                         // 确保元素都加载完成后再初始化
                         observer.disconnect();
                         createToggleButton();
                         createModifierPanel();
-                        setupKeyboardShortcuts(); // 添加键盘快捷键
+                        setupKeyboardShortcuts();
+
+                        // 设置新的观察者来监听下拉菜单的变化
+                        setupDropdownObserver();
                         break;
                     }
                 }
@@ -326,20 +356,92 @@
         });
     }
 
-    // 应用所有修改
+    // 添加下拉菜单观察者
+    function setupDropdownObserver() {
+        const dropdownObserver = new MutationObserver((mutations) => {
+            mutations.forEach(mutation => {
+                if (mutation.addedNodes.length) {
+                    const avatarUrl = document.getElementById('avatar-input')?.value;
+                    const username = document.getElementById('username-input')?.value;
+
+                    // 如果有输入值，则应用到新添加的下拉菜单元素
+                    if (avatarUrl || username) {
+                        const dropdownAvatar = document.querySelector(SELECTORS.AVATAR.DROPDOWN);
+                        const dropdownUsername = document.querySelector(SELECTORS.USERNAME.DROPDOWN);
+
+                        if (avatarUrl && dropdownAvatar) {
+                            dropdownAvatar.src = avatarUrl;
+                            const wrapper = dropdownAvatar.closest('[class*="img-default-wrapper"]');
+                            if(wrapper) {
+                                wrapper.style.backgroundImage = 'none';
+                                // 更新::before样式
+                                const className = wrapper.className.split(' ')[0];
+                                const styleId = `style-${className}`;
+                                let style = document.getElementById(styleId);
+                                if (!style) {
+                                    style = document.createElement('style');
+                                    style.id = styleId;
+                                    style.textContent = `
+                                        .${className}::before {
+                                            content: "";
+                                            position: absolute;
+                                            top: 0;
+                                            left: 0;
+                                            right: 0;
+                                            bottom: 0;
+                                            background: none;
+                                        }
+                                    `;
+                                    document.head.appendChild(style);
+                                }
+                            }
+                        }
+
+                        if (username && dropdownUsername) {
+                            dropdownUsername.textContent = username;
+                        }
+                    }
+                }
+            });
+        });
+
+        // 监听整个body以捕获下拉菜单的动态添加
+        dropdownObserver.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    // 修改应用修改函数中的样式处理
     function applyAllModifications() {
         // 修改头像和用户名
         const avatarUrl = document.getElementById('avatar-input').value;
         const username = document.getElementById('username-input').value;
 
         if(avatarUrl) {
-            const avatarImg = document.querySelector(SELECTORS.AVATAR);
-            if(avatarImg) avatarImg.src = avatarUrl;
+            // 修改顶部头像
+            const topAvatar = document.querySelector(SELECTORS.AVATAR.TOP);
+            if(topAvatar) {
+                topAvatar.src = avatarUrl;
+                updateAvatarWrapper(topAvatar);
+            }
+            
+            // 修改下拉菜单头像
+            const dropdownAvatar = document.querySelector(SELECTORS.AVATAR.DROPDOWN);
+            if(dropdownAvatar) {
+                dropdownAvatar.src = avatarUrl;
+                updateAvatarWrapper(dropdownAvatar);
+            }
         }
 
         if(username) {
-            const usernameElement = document.querySelector(SELECTORS.USERNAME);
-            if(usernameElement) usernameElement.textContent = username;
+            // 修改顶部用户名
+            const topUsername = document.querySelector(SELECTORS.USERNAME.TOP);
+            if(topUsername) topUsername.textContent = username;
+            
+            // 修改下拉菜单用户名
+            const dropdownUsername = document.querySelector(SELECTORS.USERNAME.DROPDOWN);
+            if(dropdownUsername) dropdownUsername.textContent = username;
         }
 
         // 修改数据卡片
@@ -396,6 +498,33 @@
                 }
             }
         });
+    }
+
+    // 添加头像包装器更新函数
+    function updateAvatarWrapper(avatarElement) {
+        const wrapper = avatarElement.closest('[class*="img-default-wrapper"]');
+        if(wrapper) {
+            wrapper.style.backgroundImage = 'none';
+            const className = wrapper.className.split(' ')[0];
+            const styleId = `style-${className}`;
+            let style = document.getElementById(styleId);
+            if (!style) {
+                style = document.createElement('style');
+                style.id = styleId;
+                style.textContent = `
+                    .${className}::before {
+                        content: "";
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        background: none;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        }
     }
 
     // 获取上升箭头SVG
