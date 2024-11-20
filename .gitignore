@@ -1,1 +1,10 @@
-.vscode
+# 忽略所有文件
+*
+*.*
+
+# 不忽略 .js 文件和 README.md
+!*.js
+!README.md
+
+# 不忽略 .gitignore 本身
+!.gitignore
