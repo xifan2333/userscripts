@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         抖音直播助手
+// @name         抖音推流码获取工具
 // @namespace    http://tampermonkey.net/
 // @version      1.0.0
 // @description  获取抖音直播推流信息
-// @author       You
+// @author       xifan
 // @match        https://live.douyin.com/*
 // @match        https://www.douyin.com/*
 // @grant        GM_xmlhttpRequest
@@ -12,6 +12,8 @@
 // @grant        GM_getValue
 // @connect      douyin.com
 // @connect      webcast.amemv.com
+// @downloadURL  https://raw.githubusercontent.com/xifan2333/userscripts/main/scripts/douyin-live-helper.user.js
+// @updateURL    https://raw.githubusercontent.com/xifan2333/userscripts/main/scripts/douyin-live-helper.user.js
 // ==/UserScript==
 
 (function() {
