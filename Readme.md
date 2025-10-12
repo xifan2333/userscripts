@@ -7,7 +7,7 @@
 | 名称 | 版本 | 描述 | 使用文档 | 安装地址 |
 |------|------|------|----------|----------|
 | B站推流码获取工具 | 1.14 | 获取B站第三方推流码和直播管理工具 | [使用说明](./docs/bilibili-live-helper.md) | [安装](https://raw.githubusercontent.com/xifan2333/userscripts/main/scripts/bilibili-live-helper.user.js) |
-| 抖音直播助手 | 1.0.0 | 获取抖音直播推流信息的工具 | [使用说明](./docs/douyin-live-helper.md) | [安装](https://raw.githubusercontent.com/xifan2333/userscripts/main/scripts/douyin-live-helper.user.js) |
+| 抖音直播助手 | 1.1.0 | 获取抖音直播推流信息并自动心跳保活 | [使用说明](./docs/douyin-live-helper.md) | [安装](https://raw.githubusercontent.com/xifan2333/userscripts/main/scripts/douyin-live-helper.user.js) |
 
 ## 安装方法
 
