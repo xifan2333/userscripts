@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         抖音推流码获取工具
 // @namespace    http://tampermonkey.net/
-// @version      1.1.0
-// @description  获取抖音直播推流信息并支持心跳保活
+// @version      1.3.0
+// @description  获取抖音直播推流信息并支持心跳保活（5秒随机间隔，返回原始API响应）
 // @author       xifan
 // @match        https://live.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -159,7 +159,13 @@
                     onload: function(response) {
                         try {
                             if (response.status !== 200) {
-                                throw new Error(`HTTP error! status: ${response.status}`);
+                                resolve({
+                                    success: false,
+                                    error: `HTTP ${response.status}: ${response.statusText}`,
+                                    response: response.responseText,
+                                    fatal: false
+                                });
+                                return;
                             }
                             const data = JSON.parse(response.responseText);
                             console.log('心跳响应:', data);
@@ -167,31 +173,41 @@
                             if (data.status_code === 0) {
                                 resolve({ success: true, data: data });
                             } else if (data.status_code === 30003) {
-                                // 直播已结束
-                                const message = data.data?.prompts || data.data?.message || '直播已结束';
+                                // 直播已结束，这是致命错误
                                 resolve({
                                     success: false,
-                                    error: `${message} (${data.status_code})`,
                                     fatal: true,
                                     statusCode: data.status_code,
-                                    message: message
+                                    message: data.data?.prompts || data.data?.message || '直播已结束',
+                                    data: data
                                 });
                             } else {
+                                // 其他错误，返回完整响应
                                 resolve({
                                     success: false,
-                                    error: `心跳失败: ${data.status_code}`,
                                     fatal: false,
-                                    statusCode: data.status_code
+                                    statusCode: data.status_code,
+                                    data: data
                                 });
                             }
                         } catch (error) {
                             console.error('解析心跳响应失败:', error);
-                            resolve({ success: false, error: error.message, fatal: false });
+                            resolve({
+                                success: false,
+                                error: `解析失败: ${error.message}`,
+                                response: response.responseText,
+                                fatal: false
+                            });
                         }
                     },
                     onerror: function(error) {
                         console.error('心跳请求失败:', error);
-                        resolve({ success: false, error: '心跳网络请求失败', fatal: false });
+                        resolve({
+                            success: false,
+                            error: '网络请求失败',
+                            details: error,
+                            fatal: false
+                        });
                     }
                 });
             });
@@ -219,54 +235,73 @@
             }
         });
 
-        // 每20秒发送一次心跳（与原程序保持一致，0x4e20 = 20000ms）
-        heartbeatInterval = setInterval(async () => {
-            const result = await sendHeartbeat(roomId, streamId);
-            if (result.success) {
-                heartbeatCount++;
-                updateHeartbeatStatus();
-                console.log(`心跳发送成功 #${heartbeatCount}`);
-            } else {
-                console.error('心跳发送失败:', result.error);
+        // 发送心跳的函数，带随机延迟
+        const scheduleNextHeartbeat = () => {
+            // 基础间隔 5000ms (5秒)，随机波动 ±500ms (即 4.5-5.5秒)
+            const baseInterval = 5000;
+            const randomOffset = Math.floor(Math.random() * 1000) - 500; // -500 到 +500
+            const interval = baseInterval + randomOffset;
 
-                // 检查是否为致命错误（如直播已结束）
-                if (result.fatal) {
-                    console.log('检测到致命错误，停止心跳保活');
-                    stopHeartbeat();
+            heartbeatInterval = setTimeout(async () => {
+                const result = await sendHeartbeat(roomId, streamId);
+                if (result.success) {
+                    heartbeatCount++;
+                    updateHeartbeatStatus();
+                    console.log(`心跳发送成功 #${heartbeatCount}, 下次间隔: ${interval}ms`);
 
-                    // 发送桌面通知
-                    if (typeof GM_notification !== 'undefined') {
-                        GM_notification({
-                            title: '抖音直播助手',
-                            text: result.message || '直播已结束，心跳保活已停止',
-                            timeout: 5000
-                        });
-                    } else if ('Notification' in window && Notification.permission === 'granted') {
-                        new Notification('抖音直播助手', {
-                            body: result.message || '直播已结束，心跳保活已停止',
-                            icon: 'https://www.douyin.com/favicon.ico'
-                        });
-                    }
-
-                    // 更新UI显示
-                    updateHeartbeatStatus(result.error, true);
-
-                    // 隐藏停止按钮
-                    const stopBtn = document.getElementById('stopHeartbeatBtn');
-                    if (stopBtn) {
-                        stopBtn.style.display = 'none';
-                    }
+                    // 继续调度下一次心跳
+                    scheduleNextHeartbeat();
                 } else {
-                    updateHeartbeatStatus(result.error);
+                    console.error('心跳发送失败:', result);
+
+                    // 检查是否为致命错误（如直播已结束）
+                    if (result.fatal) {
+                        console.log('检测到致命错误，停止心跳保活');
+                        stopHeartbeat();
+
+                        // 发送桌面通知
+                        const notificationMessage = result.message || JSON.stringify(result.data || result);
+                        if (typeof GM_notification !== 'undefined') {
+                            GM_notification({
+                                title: '抖音直播助手',
+                                text: notificationMessage,
+                                timeout: 5000
+                            });
+                        } else if ('Notification' in window && Notification.permission === 'granted') {
+                            new Notification('抖音直播助手', {
+                                body: notificationMessage,
+                                icon: 'https://www.douyin.com/favicon.ico'
+                            });
+                        }
+
+                        // 更新UI显示 - 显示完整错误信息
+                        const errorDisplay = result.data ? JSON.stringify(result.data, null, 2) : (result.error || '未知错误');
+                        updateHeartbeatStatus(errorDisplay, true);
+
+                        // 隐藏停止按钮
+                        const stopBtn = document.getElementById('stopHeartbeatBtn');
+                        if (stopBtn) {
+                            stopBtn.style.display = 'none';
+                        }
+                    } else {
+                        // 非致命错误，显示完整错误信息
+                        const errorDisplay = result.data ? JSON.stringify(result.data, null, 2) : (result.error || '未知错误');
+                        updateHeartbeatStatus(errorDisplay);
+                        // 继续尝试
+                        scheduleNextHeartbeat();
+                    }
                 }
-            }
-        }, 20000);
+            }, interval);
+        };
+
+        // 开始调度心跳
+        scheduleNextHeartbeat();
     }
 
     // 停止心跳
     function stopHeartbeat() {
         if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
+            clearTimeout(heartbeatInterval);
             heartbeatInterval = null;
         }
 
@@ -343,7 +378,12 @@
                     onload: function(response) {
                         try {
                             if (response.status !== 200) {
-                                throw new Error(`HTTP error! status: ${response.status}`);
+                                resolve({
+                                    success: false,
+                                    error: `HTTP ${response.status}: ${response.statusText}`,
+                                    response: response.responseText
+                                });
+                                return;
                             }
 
                             const data = JSON.parse(response.responseText);
@@ -398,18 +438,20 @@
                                     rawData: data
                                 });
                             } else {
+                                // 返回完整的 API 响应
                                 console.error('API返回错误:', data);
                                 resolve({
                                     success: false,
-                                    error: `API错误: ${data.status_code}`,
-                                    message: data.message || '未知错误'
+                                    statusCode: data.status_code,
+                                    data: data
                                 });
                             }
                         } catch (error) {
                             console.error('解析响应失败:', error);
                             resolve({
                                 success: false,
-                                error: error.message
+                                error: `解析失败: ${error.message}`,
+                                response: response.responseText
                             });
                         }
                     },
@@ -417,7 +459,8 @@
                         console.error('请求失败:', error);
                         resolve({
                             success: false,
-                            error: '网络请求失败'
+                            error: '网络请求失败',
+                            details: error
                         });
                     }
                 });
@@ -655,11 +698,15 @@
                             }
                         }, 100);
                     } else {
+                        // 显示完整的错误响应
+                        const errorDisplay = result.data
+                            ? `<pre style="white-space: pre-wrap; word-break: break-all;">${JSON.stringify(result.data, null, 2)}</pre>`
+                            : (result.error || '未知错误');
+
                         infoDiv.innerHTML = `
                             <div class="error">
                                 <strong>获取失败</strong><br>
-                                ${result.error}
-                                ${result.message ? `<br>${result.message}` : ''}
+                                ${errorDisplay}
                             </div>
                         `;
                     }
