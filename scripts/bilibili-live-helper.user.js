@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站推流码获取工具
 // @namespace    https://github.com/smathsp
-// @version      1.16
+// @version      1.14
 // @description  获取第三方推流码
 // @author       xifan
 // @license      GPL-3.0
@@ -18,7 +18,6 @@
 // @connect      passport.bilibili.com
 // @connect      bilibili.com
 // @require      https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/blueimp-md5/2.19.0/js/md5.min.js
 // @run-at       document-end
 // @downloadURL  https://raw.githubusercontent.com/xifan2333/userscripts/main/scripts/bilibili-live-helper.user.js
 // @updateURL    https://raw.githubusercontent.com/xifan2333/userscripts/main/scripts/bilibili-live-helper.user.js
@@ -64,35 +63,6 @@
         onabort: reject,
       });
     });
-  }
-
-  // 新版 startLive 需要提供直播姬签名参数(version/build/appkey/sign)以规避人脸识别门槛(60024)。
-  // 仅提供 version/build 对部分强制人脸认证的账号无效，必须配齐 appkey/sign 完整签名。
-  // 数据来自直播姬 APP 逆向：常量与签名算法与官方 livehime 一致。
-  const APP_KEY = "aae92bc66f3edfab";
-  const APP_SECRET = "af125a0d5279fd576c1b4418a3e8276d";
-  const LIVEHIME_VERSION = "7.63.0.10783";
-  const LIVEHIME_BUILD = 10783;
-
-  // 对 startLive 请求参数做直播姬 APP 签名并返回完整表单参数
-  // 注意：签名集合需包含 room_id/area_v2/csrf/csrf_token/type，与官方 livehime 一致。
-  function applyAppSign(params) {
-    const signed = Object.assign({}, params, {
-      type: 2,
-      appkey: APP_KEY,
-      build: String(LIVEHIME_BUILD),
-      platform: "pc_link",
-      ts: String(Math.floor(Date.now() / 1000)),
-      version: LIVEHIME_VERSION,
-      access_key: "",
-    });
-    const keys = Object.keys(signed).sort();
-    const query = keys
-      .map((k) => encodeURIComponent(k) + "=" + encodeURIComponent(signed[k]))
-      .join("&");
-    // 依赖 @require 加载的 blueimp-md5 全局 md5() 函数
-    signed.sign = typeof md5 === "function" ? md5(query + APP_SECRET) : "";
-    return signed;
   }
 
   // SVG 图标常量
@@ -370,7 +340,17 @@
     origin: "https://link.bilibili.com",
     referer: "https://link.bilibili.com/p/center/index",
     "user-agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36 pc_app/livehime build/10783",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  };
+
+  // 开始直播数据模板
+  const startData = {
+    room_id: "",
+    platform: "pc_link", //感谢bilibili Z-Lake提供
+    area_v2: "",
+    backup_stream: "0",
+    csrf_token: "",
+    csrf: "",
   };
 
   // 停止直播数据模板
@@ -1414,23 +1394,20 @@
         return;
       }
 
+      // 设置请求参数
+      startData.room_id = roomId;
+      startData.csrf_token = csrf;
+      startData.csrf = csrf;
+      startData.area_v2 = areaId;
+
       // 获取推流码
       showMessage("正在获取推流码...");
-
-      // 使用直播姬 APP 完整签名（version/build/appkey/sign），规避人脸识别门槛(60024)
-      const signedStartData = applyAppSign({
-        room_id: roomId,
-        area_v2: areaId,
-        csrf_token: csrf,
-        csrf: csrf,
-      });
-      console.log("[BiliLive] startLive 签名参数:", Object.keys(signedStartData).sort());
 
       const startLiveResponse = await gmRequest({
         method: "POST",
         url: API_URL_START_LIVE,
         headers: headers,
-        data: new URLSearchParams(signedStartData).toString(),
+        data: new URLSearchParams(startData).toString(),
       });
 
       const startLiveResult = JSON.parse(startLiveResponse.responseText);
@@ -1728,19 +1705,17 @@
   // 重试开始直播
   async function retryStartLive(roomId, title, areaId) {
     try {
-      // 使用与首次开播相同的直播姬 APP 完整签名重新尝试
-      const signedStartData = applyAppSign({
-        room_id: roomId,
-        area_v2: areaId,
-        csrf_token: csrf,
-        csrf: csrf,
-      });
+      // 重新设置开始直播数据
+      startData.room_id = roomId;
+      startData.csrf_token = csrf;
+      startData.csrf = csrf;
+      startData.area_v2 = areaId;
 
       const response = await gmRequest({
         method: "POST",
         url: API_URL_START_LIVE,
         headers: headers,
-        data: new URLSearchParams(signedStartData).toString(),
+        data: new URLSearchParams(startData).toString(),
       });
 
       const result = JSON.parse(response.responseText);
@@ -1759,28 +1734,8 @@
 
   // 处理开始直播成功
   function handleStartLiveSuccess(data, title, areaId) {
-    // 兼容返回格式：优先使用 rtmp，异常时回退到 protocols[0]
-    let rtmpAddr = "";
-    let rtmpCode = "";
-    if (data && data.rtmp && data.rtmp.addr) {
-      // 新版返回格式中 rtmp 为 ''，实际地址在 protocols 数组里
-      if (data.rtmp.addr === "" && Array.isArray(data.protocols) && data.protocols.length) {
-        rtmpAddr = data.protocols[0].addr || "";
-        rtmpCode = data.protocols[0].code || "";
-      } else {
-        rtmpAddr = data.rtmp.addr;
-        rtmpCode = data.rtmp.code;
-      }
-    } else if (data && Array.isArray(data.protocols) && data.protocols.length) {
-      rtmpAddr = data.protocols[0].addr || "";
-      rtmpCode = data.protocols[0].code || "";
-    }
-
-    if (!rtmpAddr || !rtmpCode) {
-      console.error("推流地址解析失败:", data);
-      showMessage("已开播，但未解析到推流地址（返回格式变化），请查看控制台日志", true);
-      return;
-    }
+    const rtmpAddr = data.rtmp.addr;
+    const rtmpCode = data.rtmp.code;
 
     // 新增：保存本次推流信息到本地用于下次对比
     GM_setValue("bili_last_rtmp_addr", rtmpAddr);
