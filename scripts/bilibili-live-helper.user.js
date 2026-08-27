@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站推流码获取工具
 // @namespace    https://github.com/smathsp
-// @version      1.14
+// @version      1.15
 // @description  获取第三方推流码
 // @author       xifan
 // @license      GPL-3.0
@@ -64,6 +64,12 @@
       });
     });
   }
+
+  // 新版 startLive 需要提供 version/build 参数以规避人脸识别门槛(60024)。
+  // 根据 B 站接口整理文档：部分账号不提供会被要求人脸识别，提供即可通过。
+  // 这里使用固定值，避免依赖直播姬版本接口（该接口返回的最新版本有时反而必须配套 appkey/sign）。
+  const LIVEHIME_VERSION = "1.0.0";
+  const LIVEHIME_BUILD = 1234;
 
   // SVG 图标常量
   const SUN_SVG =
@@ -349,6 +355,9 @@
     platform: "pc_link", //感谢bilibili Z-Lake提供
     area_v2: "",
     backup_stream: "0",
+    version: "",
+    build: "",
+    ts: "",
     csrf_token: "",
     csrf: "",
   };
@@ -1403,6 +1412,11 @@
       // 获取推流码
       showMessage("正在获取推流码...");
 
+      // 补充直播姬版本信息，规避新版 startLive 的人脸识别门槛(60024)
+      startData.version = LIVEHIME_VERSION;
+      startData.build = LIVEHIME_BUILD;
+      startData.ts = Math.floor(Date.now() / 1000);
+
       const startLiveResponse = await gmRequest({
         method: "POST",
         url: API_URL_START_LIVE,
@@ -1711,6 +1725,13 @@
       startData.csrf = csrf;
       startData.area_v2 = areaId;
 
+      // 重试时也补充直播姬版本信息，确保无人脸识别门槛
+      if (!startData.version || !startData.build) {
+        startData.version = LIVEHIME_VERSION;
+        startData.build = LIVEHIME_BUILD;
+      }
+      startData.ts = Math.floor(Date.now() / 1000);
+
       const response = await gmRequest({
         method: "POST",
         url: API_URL_START_LIVE,
@@ -1734,8 +1755,28 @@
 
   // 处理开始直播成功
   function handleStartLiveSuccess(data, title, areaId) {
-    const rtmpAddr = data.rtmp.addr;
-    const rtmpCode = data.rtmp.code;
+    // 兼容返回格式：优先使用 rtmp，异常时回退到 protocols[0]
+    let rtmpAddr = "";
+    let rtmpCode = "";
+    if (data && data.rtmp && data.rtmp.addr) {
+      // 新版返回格式中 rtmp 为 ''，实际地址在 protocols 数组里
+      if (data.rtmp.addr === "" && Array.isArray(data.protocols) && data.protocols.length) {
+        rtmpAddr = data.protocols[0].addr || "";
+        rtmpCode = data.protocols[0].code || "";
+      } else {
+        rtmpAddr = data.rtmp.addr;
+        rtmpCode = data.rtmp.code;
+      }
+    } else if (data && Array.isArray(data.protocols) && data.protocols.length) {
+      rtmpAddr = data.protocols[0].addr || "";
+      rtmpCode = data.protocols[0].code || "";
+    }
+
+    if (!rtmpAddr || !rtmpCode) {
+      console.error("推流地址解析失败:", data);
+      showMessage("已开播，但未解析到推流地址（返回格式变化），请查看控制台日志", true);
+      return;
+    }
 
     // 新增：保存本次推流信息到本地用于下次对比
     GM_setValue("bili_last_rtmp_addr", rtmpAddr);
